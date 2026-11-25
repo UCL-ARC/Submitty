@@ -30,6 +30,12 @@
 #
 # You can also customize VM resources using environment variables:
 # VM_MEMORY=4096 VM_CPUS=4 vagrant up
+#
+# To run the development environment in a Docker container instead of a VM, use the docker
+# provider. The container is built from .setup/vagrant/Dockerfile, runs systemd, and is
+# started privileged so that the autograder can run its own Docker containers inside it:
+#
+# vagrant up --provider=docker
 
 # Don't buffer output.
 $stdout.sync = true
@@ -38,6 +44,16 @@ $stderr.sync = true
 require 'json'
 
 ON_CI = !ENV.fetch('CI', '').empty?
+
+# Whether this run uses the docker provider: given on the command line, through
+# VAGRANT_DEFAULT_PROVIDER, or because the machine was already created with it (commands such
+# as `vagrant provision` take no --provider flag). Docker containers have no prebuilt Submitty
+# box, so they are always installed from scratch.
+provider_index = ARGV.index('--provider')
+DOCKER_PROVIDER = ARGV.include?('--provider=docker') ||
+                  (!provider_index.nil? && ARGV[provider_index + 1] == 'docker') ||
+                  ENV.fetch('VAGRANT_DEFAULT_PROVIDER', '') == 'docker' ||
+                  !Dir.glob(File.join(__dir__, '.vagrant', 'machines', '*', 'docker', 'id')).empty?
 
 # VM resource configuration
 if ARGV[0] == 'workers'
@@ -150,7 +166,7 @@ Vagrant.configure(2) do |config|
   apple_silicon = Vagrant::Util::Platform.darwin? && (arm || (`sysctl -n machdep.cpu.brand_string`.chomp.start_with? 'Apple M'))
   use_prebuilt_version = !ENV.fetch('PREBUILT_VERSION', '').empty?
   custom_box = ENV.has_key?('VAGRANT_BOX') 
-  base_box = ENV.has_key?('BASE_BOX') || ENV.has_key?('FROM_SCRATCH') || apple_silicon || arm
+  base_box = ENV.has_key?('BASE_BOX') || ENV.has_key?('FROM_SCRATCH') || apple_silicon || arm || DOCKER_PROVIDER
   # The time in seconds that Vagrant will wait for the machine to boot and be accessible.
   config.vm.boot_timeout = 600
 
@@ -301,6 +317,30 @@ Vagrant.configure(2) do |config|
 
     qe.memory = "#{VM_MEMORY}M"
     qe.smp = VM_CPUS
+  end
+
+  config.vm.provider 'docker' do |docker, override|
+    # The docker provider builds an image instead of using a box.
+    override.vm.box = nil
+    docker.build_dir = '.setup/vagrant'
+    docker.name = 'submitty'
+    docker.has_ssh = true
+    docker.remains_running = true
+
+    # systemd needs to be PID 1 with access to the cgroup hierarchy, and the autograder runs
+    # Docker inside the container, so the container has to be privileged.
+    docker.privileged = true
+    docker.create_args = [
+      '--cgroupns=host',
+      '--volume=/sys/fs/cgroup:/sys/fs/cgroup:rw',
+      '--tmpfs=/run',
+      '--tmpfs=/run/lock',
+      '--tmpfs=/tmp:exec',
+      "--memory=#{VM_MEMORY}m",
+      "--cpus=#{VM_CPUS}",
+    ]
+
+    mount_folders(override, [])
   end
 
   config.vm.provision :shell, :inline => " sudo timedatectl set-timezone America/New_York", run: "once"
