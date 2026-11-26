@@ -131,7 +131,11 @@ if [ ${DEV_VM} == 1 ] && [ ${WORKER} == 0 ]; then
 
     sed -i -e "s/PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
 
-    chmod 755 -R /usr/local/submitty/GIT_CHECKOUT
+    # In a container (vagrant's docker provider) the checkout is a bind mount of the host's
+    # files, so a chmod here would rewrite the modes of every file in the host's git repos.
+    if ! systemd-detect-virt --container --quiet; then
+        chmod 755 -R /usr/local/submitty/GIT_CHECKOUT
+    fi
 
     # Set up some convinence stuff for the root user on ssh
 

@@ -35,9 +35,11 @@ if [[ "$CI" -ne "0" ]] ; then
     echo "Submitty is being run in the Github Actions CI."
 fi
 
-# Expand the default logical volume for Ubuntu
-lvresize -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv
-resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
+# Expand the default logical volume for Ubuntu (not present in Docker containers)
+if [ -e /dev/mapper/ubuntu--vg-ubuntu--lv ]; then
+    lvresize -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv
+    resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
+fi
 
 # Start installation
 # shellcheck disable=2068
